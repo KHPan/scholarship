@@ -1,8 +1,11 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow,
-			QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+			QTableWidget, QTableWidgetItem,
+			QWidget, QPushButton,
+			QVBoxLayout,
+			QFontDialog)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFont
 from bs4 import BeautifulSoup
 import requests
 import webbrowser
@@ -52,12 +55,26 @@ class MyMainWindow(QMainWindow):
 		super().__init__()
 		self.initUI()
 
+	def onFontBtn(self):
+		font, ok = QFontDialog.getFont(self.font, self)
+		if ok:
+			self.font = font
+			self.setFont(self.font)
+
 	def initUI(self):
+		self.font = QFont()
+		self.font.setPointSize(15)
+		self.setFont(self.font)
 		self.setWindowTitle("獎學金程式")
 
 		central_widget = QWidget(self)
 		self.setCentralWidget(central_widget)
 		mainLayout = QVBoxLayout(central_widget)
+
+		btn = QPushButton(self)
+		btn.setText("設定字體")
+		btn.clicked.connect(self.onFontBtn)
+		mainLayout.addWidget(btn)
 
 		url = r"https://advisory.ntu.edu.tw/CMS/Scholarship?pageId=232&keyword=&applicant_type=18&sort=f_apply_start_date&pageIndex=15&show_way=all"
 		re = requests.get(url)
