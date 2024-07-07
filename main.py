@@ -3,7 +3,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow,
 			QTableWidget, QTableWidgetItem,
 			QWidget, QPushButton, QTextBrowser,
 			QVBoxLayout, QHBoxLayout,
-			QFontDialog, QFileDialog, QProgressDialog, QInputDialog, QDialog)
+			QFontDialog, QFileDialog, QProgressDialog,
+			QInputDialog, QMessageBox, QDialog)
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QColor, QFont
 from bs4 import BeautifulSoup
@@ -113,6 +114,7 @@ class LineQTableWidget(QTableWidget):
 class MyMainWindow(QMainWindow):
 	def __init__(self):
 		super().__init__()
+		self.record = []
 		self.initUI()
 
 	def onFontBtn(self):
@@ -132,6 +134,7 @@ class MyMainWindow(QMainWindow):
 		if dialog.exec_() == QInputDialog.Accepted:
 			url = dialog.textValue()
 			self.setTable(url)
+			self.record = []
 
 	def onImport(self):
 		filename, _ = QFileDialog.getOpenFileName(self, "Open File", "",
@@ -140,6 +143,7 @@ class MyMainWindow(QMainWindow):
 			with open(filename, "r") as f:
 				dct = json.load(f)
 				self.setTable(dct=dct)
+			self.record = []
 	
 	def onExport(self):
 		filename, _ = QFileDialog.getSaveFileName(self, "Save File", "",
@@ -148,6 +152,15 @@ class MyMainWindow(QMainWindow):
 			dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids}
 			with open(filename, "w") as f:
 				json.dump(dct, f)
+
+	def onBackward(self):
+		if len(self.record) == 0:
+			QMessageBox.information(self, "通知", "無上一步")
+		else:
+			row, chart, id = self.record.pop()
+			self.chart.insert(row, chart)
+			self.ids.insert(row, id)
+			self.setTable()
 
 	def addBtn(self, text: str, clicked: Callable[[None], None]
 			) -> QPushButton:
@@ -239,6 +252,7 @@ class MyMainWindow(QMainWindow):
 		buttonLayout.addWidget(self.addBtn("網址匯入", self.onFromUrl))
 		buttonLayout.addWidget(self.addBtn("檔案匯入", self.onImport))
 		buttonLayout.addWidget(self.addBtn("檔案匯出", self.onExport))
+		buttonLayout.addWidget(self.addBtn("回到上一步", self.onBackward))
 		mainLayout.addLayout(buttonLayout)
 
 		self.table = LineQTableWidget(self)
@@ -252,7 +266,7 @@ class MyMainWindow(QMainWindow):
 	def setTable(self, url: str = None, dct: dict = None):
 		if url is not None:
 			self.titles, self.chart, self.ids = self.openUrl(url)	
-		else:
+		elif dct is not None:
 			self.titles = dct["titles"]
 			self.chart = dct["chart"]
 			self.ids = dct["ids"]
@@ -270,10 +284,12 @@ class MyMainWindow(QMainWindow):
 		dialog.exec_()
 		if dialog.result == "Remove":
 			self.table.removeRow(row)
+			self.record.append((row, self.chart[row], self.ids[row]))
 			self.chart.pop(row)
 			self.ids.pop(row)
 		elif dialog.result == "RemoveAndNext":
 			self.table.removeRow(row)
+			self.record.append((row, self.chart[row], self.ids[row]))
 			self.chart.pop(row)
 			self.ids.pop(row)
 			if row < len(self.chart):
