@@ -1,16 +1,76 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow,
 			QTableWidget, QTableWidgetItem,
-			QWidget, QPushButton,
-			QVBoxLayout,
-			QFontDialog)
-from PyQt5.QtCore import Qt
+			QWidget, QPushButton, QTextBrowser,
+			QVBoxLayout, QHBoxLayout,
+			QFontDialog, QFileDialog, QProgressDialog, QInputDialog, QDialog)
+from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QColor, QFont
 from bs4 import BeautifulSoup
 import requests
 import webbrowser
 import itertools
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
+from threading import Thread
+from typing import Sequence, Tuple, Callable
+import json
+
+class ContentDialog(QDialog):
+	def __init__(self, parent, url):
+		super().__init__(parent)
+		self.url = url
+		self.result = None
+		self.initUI(self.url)
+	
+	def addBtn(self, text: str, clicked: Callable[[None], None]
+			) -> QPushButton:
+		btn = QPushButton(self)
+		btn.setText(text)
+		btn.clicked.connect(clicked)
+		return btn
+	
+	def onRemove(self):
+		self.result = "Remove"
+		self.close()
+	
+	def onRemoveAndNext(self):
+		self.result = "RemoveAndNext"
+		self.close()
+	
+	def onNext(self):
+		self.result = "Next"
+		self.close()
+
+	def initUI(self, url: str):
+		self.setWindowTitle("獎學金詳細資訊")
+		self.resize(800, 600)
+		self.setFont(self.parent().font)
+		mainLayout = QVBoxLayout(self)
+
+		buttonLayout = QHBoxLayout()
+		buttonLayout.addWidget(self.addBtn("移除", self.onRemove))
+		buttonLayout.addWidget(self.addBtn("移除並前往下一個", self.onRemoveAndNext))
+		buttonLayout.addWidget(self.addBtn("下一個", self.onNext))
+		mainLayout.addLayout(buttonLayout)
+
+		textBrowser = QTextBrowser(self)
+		re = requests.get(url)
+		soup = BeautifulSoup(re.text, "lxml")
+		table = soup.find("table", class_="blank-line-half")
+		# 修改表格的style属性，添加格線样式
+		table['style'] = "border: 1px solid black; border-collapse: collapse;"
+		# 为表格中的每个td和th元素添加格線样式
+		for td in table.find_all('td'):
+			td['style'] = "border: 1px solid black;"
+		for th in table.find_all('th'):
+			th['style'] = "border: 1px solid black;"
+		textBrowser.setHtml(table.prettify())
+		textBrowser.anchorClicked.connect(self.openExternalLink)
+		textBrowser.setSource = lambda x: None
+		mainLayout.addWidget(textBrowser)
+
+	def openExternalLink(self, url: QUrl):
+		webbrowser.open(urljoin(self.url, url.toString()))
 
 class LineQTableWidget(QTableWidget):
 	def __init__(self, *args, **kwargs):
@@ -60,6 +120,109 @@ class MyMainWindow(QMainWindow):
 		if ok:
 			self.font = font
 			self.setFont(self.font)
+	
+	def onFromUrl(self):
+		dialog = QInputDialog(self)
+		dialog.setInputMode(QInputDialog.TextInput)
+		dialog.setWindowTitle("輸入網址")
+		dialog.setLabelText("網址")
+		dialog.setFont(self.font)
+
+		# 显示对话框并获取输入结果
+		if dialog.exec_() == QInputDialog.Accepted:
+			url = dialog.textValue()
+			self.setTable(url)
+
+	def onImport(self):
+		filename, _ = QFileDialog.getOpenFileName(self, "Open File", "",
+							"JSON Files (*.json)")
+		if filename:
+			with open(filename, "r") as f:
+				dct = json.load(f)
+				self.setTable(dct=dct)
+	
+	def onExport(self):
+		filename, _ = QFileDialog.getSaveFileName(self, "Save File", "",
+							"JSON Files (*.json)")
+		if filename:
+			dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids}
+			with open(filename, "w") as f:
+				json.dump(dct, f)
+
+	def addBtn(self, text: str, clicked: Callable[[None], None]
+			) -> QPushButton:
+		btn = QPushButton(self)
+		btn.setText(text)
+		btn.clicked.connect(clicked)
+		return btn
+
+	def openUrl(self, url: str) -> Tuple[Sequence[str],
+							Sequence[Sequence[str]], Sequence[str]]:
+		titles = None
+		chart = None
+		ids = None
+		def all_busy():
+			nonlocal titles, chart, ids
+			def getTitle():
+				nonlocal titles
+				re = requests.get(url)
+				soup = BeautifulSoup(re.text, "lxml")
+				titles = [t.getText() for t in
+					soup.find("div", class_="list-result").find("table")
+						.find("thead").find_all("td")]
+			title_thread = Thread(target=getTitle)
+			title_thread.start()
+			
+			def setChart(page: int, index: int):
+				url_parts = urlparse(url)
+				query_params = parse_qs(url_parts.query)
+				query_params["pageIndex"] = page
+				new_query_string = urlencode(query_params, doseq=True)
+				new_url_parts = url_parts._replace(query=new_query_string)
+				new_url = urlunparse(new_url_parts)
+				re = requests.get(new_url)
+				soup = BeautifulSoup(re.text, "lxml")
+				tbody = (soup.find("div", class_="list-result")
+						.find("table").find("tbody"))
+				now_chart = [[td.getText() for td in tr.find_all("td")]
+					for tr in tbody.find_all("tr")]
+				if len(now_chart) > 0:
+					charts[index] = now_chart
+					ids[index] = [tr.get("id") for tr in tbody.find_all("tr")]
+
+			A_TIME = 20
+			charts = [None] * A_TIME
+			ids = [None] * A_TIME
+			index = 0
+			while True:
+				print(f"{index+1} to {index+A_TIME}")
+				threads = []
+				for _ in range(A_TIME):
+					threads.append(Thread(target=setChart,
+							args=(index+1, index)))
+					threads[-1].start()
+					index += 1
+				for t in threads:
+					t.join()
+				if charts[-1] is None:
+					break
+				charts.extend([None] * A_TIME)
+				ids.extend([None] * A_TIME)
+			chart = list(itertools.chain(*[c for c in charts if c is not None]))
+			ids = list(itertools.chain(*[i for i in ids if i is not None]))
+			title_thread.join()
+		progressDialog = QProgressDialog("正在爬蟲抓取...", "取消", 0, 0, self)
+		progressDialog.setFont(self.font)
+		progressDialog.setCancelButton(None)  # 選擇性：移除取消按鈕
+		progressDialog.resize(300, 100)
+		progressDialog.setStyleSheet("QProgressDialog {margin: 0px;} QProgressBar {border: 2px solid grey; border-radius: 5px; text-align: center;}")
+		progressDialog.show()
+		th_all = Thread(target=all_busy)
+		th_all.start()
+		while th_all.is_alive():
+			QApplication.processEvents()
+		progressDialog.close()
+		return titles, chart, ids
 
 	def initUI(self):
 		self.font = QFont()
@@ -71,50 +234,53 @@ class MyMainWindow(QMainWindow):
 		self.setCentralWidget(central_widget)
 		mainLayout = QVBoxLayout(central_widget)
 
-		btn = QPushButton(self)
-		btn.setText("設定字體")
-		btn.clicked.connect(self.onFontBtn)
-		mainLayout.addWidget(btn)
+		buttonLayout = QHBoxLayout()
+		buttonLayout.addWidget(self.addBtn("設定字體", self.onFontBtn))
+		buttonLayout.addWidget(self.addBtn("網址匯入", self.onFromUrl))
+		buttonLayout.addWidget(self.addBtn("檔案匯入", self.onImport))
+		buttonLayout.addWidget(self.addBtn("檔案匯出", self.onExport))
+		mainLayout.addLayout(buttonLayout)
 
-		url = r"https://advisory.ntu.edu.tw/CMS/Scholarship?pageId=232&keyword=&applicant_type=18&sort=f_apply_start_date&pageIndex=15&show_way=all"
-		re = requests.get(url)
-		soup = BeautifulSoup(re.text, "lxml")
-		titles = [t.getText() for t in
-			soup.find("div", class_="list-result").find("table")
-				.find("thead").find_all("td")]
-		
-		url_parts = urlparse(url)
-		query_params = parse_qs(url_parts.query)
-
-		chart = []
-		self.ids = []
-		for page in itertools.count(1, 1):
-			query_params["pageIndex"] = page
-			new_query_string = urlencode(query_params, doseq=True)
-			new_url_parts = url_parts._replace(query=new_query_string)
-			new_url = urlunparse(new_url_parts)
-			re = requests.get(new_url)
-			soup = BeautifulSoup(re.text, "lxml")
-			tbody = (soup.find("div", class_="list-result")
-					.find("table").find("tbody"))
-			now_chart = [[td.getText() for td in tr.find_all("td")]
-				for tr in tbody.find_all("tr")]
-			if len(now_chart) == 0:
-				break
-			chart.extend(now_chart)
-			self.ids.extend([tr.get("id") for tr in tbody.find_all("tr")])
-		self.table = LineQTableWidget(len(chart), len(titles), self)
-		self.table.setHorizontalHeaderLabels(titles)
+		self.table = LineQTableWidget(self)
 		self.table.verticalHeader().setVisible(False)
-		for y, line in enumerate(chart):
-			for x, cell in enumerate(line):
-				self.table.setItem(y, x, QTableWidgetItem(cell))
 		self.table.setSelectionBehavior(QTableWidget.SelectRows)
 		self.table.cellClicked.connect(self.clickTable)
 		mainLayout.addWidget(self.table)
-	
+
+		self.showMaximized()
+
+	def setTable(self, url: str = None, dct: dict = None):
+		if url is not None:
+			self.titles, self.chart, self.ids = self.openUrl(url)	
+		else:
+			self.titles = dct["titles"]
+			self.chart = dct["chart"]
+			self.ids = dct["ids"]
+		self.table.clear()
+		self.table.setRowCount(len(self.chart))
+		self.table.setColumnCount(len(self.titles))
+		self.table.setHorizontalHeaderLabels(self.titles)
+		for y, line in enumerate(self.chart):
+			for x, cell in enumerate(line):
+				self.table.setItem(y, x, QTableWidgetItem(cell))
+
 	def clickTable(self, row, _):
-		webbrowser.open(f"https://advisory.ntu.edu.tw/CMS/ScholarshipDetail?id={self.ids[row]}")
+		url = f"https://advisory.ntu.edu.tw/CMS/ScholarshipDetail?id={self.ids[row]}"
+		dialog = ContentDialog(self, url)
+		dialog.exec_()
+		if dialog.result == "Remove":
+			self.table.removeRow(row)
+			self.chart.pop(row)
+			self.ids.pop(row)
+		elif dialog.result == "RemoveAndNext":
+			self.table.removeRow(row)
+			self.chart.pop(row)
+			self.ids.pop(row)
+			if row < len(self.chart):
+				self.clickTable(row, None)
+		elif dialog.result == "Next":
+			if row < len(self.chart):
+				self.clickTable(row, None)
 
 if __name__ == "__main__":
 	app = QApplication(sys.argv)
