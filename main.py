@@ -15,6 +15,8 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 from threading import Thread
 from typing import Sequence, Tuple, Callable
 import json
+import re
+from datetime import datetime
 
 class ContentDialog(QDialog):
 	def __init__(self, parent, url):
@@ -149,7 +151,11 @@ class MyMainWindow(QMainWindow):
 		filename, _ = QFileDialog.getSaveFileName(self, "Save File", "",
 							"JSON Files (*.json)")
 		if filename:
-			dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids}
+			dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids,
+		  		"start_dates": [ds.strftime("%Y/%m/%d")
+					  for ds in self.start_dates],
+				"end_dates": [de.strftime("%Y/%m/%d")
+				  		for de in self.end_dates]}
 			with open(filename, "w") as f:
 				json.dump(dct, f)
 
@@ -157,9 +163,11 @@ class MyMainWindow(QMainWindow):
 		if len(self.record) == 0:
 			QMessageBox.information(self, "通知", "無上一步")
 		else:
-			row, chart, id = self.record.pop()
+			row, chart, id, start_date, end_date = self.record.pop()
 			self.chart.insert(row, chart)
 			self.ids.insert(row, id)
+			self.start_dates.insert(row, start_date)
+			self.end_dates.insert(row, end_date)
 			self.setTable()
 
 	def addBtn(self, text: str, clicked: Callable[[None], None]
@@ -170,7 +178,8 @@ class MyMainWindow(QMainWindow):
 		return btn
 
 	def openUrl(self, url: str) -> Tuple[Sequence[str],
-							Sequence[Sequence[str]], Sequence[str]]:
+						Sequence[Sequence[str]], Sequence[str],
+						datetime, datetime]:
 		titles = None
 		chart = None
 		ids = None
@@ -235,7 +244,22 @@ class MyMainWindow(QMainWindow):
 		while th_all.is_alive():
 			QApplication.processEvents()
 		progressDialog.close()
-		return titles, chart, ids
+		start_date = []
+		end_date = []
+		for line in chart:
+			dates = re.findall(r"\d{4}/\d{1,2}/\d{1,2}", line[2])
+			start_date.append(datetime.strptime(dates[0], "%Y/%m/%d"))
+			end_date.append(datetime.strptime(dates[1], "%Y/%m/%d"))
+		return titles, chart, ids, start_date, end_date
+
+	def onRemoveInvalid(self):
+		now = datetime.now()
+		removes = []
+		for i, (sd, ed) in enumerate(zip(self.start_dates, self.end_dates)):
+			if sd > now or ed < now:
+				removes.append(i)
+		for i in reversed(removes):
+			self.removeRow(i)
 
 	def initUI(self):
 		self.font = QFont()
@@ -253,6 +277,7 @@ class MyMainWindow(QMainWindow):
 		buttonLayout.addWidget(self.addBtn("檔案匯入", self.onImport))
 		buttonLayout.addWidget(self.addBtn("檔案匯出", self.onExport))
 		buttonLayout.addWidget(self.addBtn("回到上一步", self.onBackward))
+		buttonLayout.addWidget(self.addBtn("移除過期", self.onRemoveInvalid))
 		mainLayout.addLayout(buttonLayout)
 
 		self.table = LineQTableWidget(self)
@@ -263,13 +288,18 @@ class MyMainWindow(QMainWindow):
 
 		self.showMaximized()
 
-	def setTable(self, url: str = None, dct: dict = None):
+	def setTable(self, url: str | None = None, dct: dict | None = None):
 		if url is not None:
-			self.titles, self.chart, self.ids = self.openUrl(url)	
+			self.titles, self.chart, self.ids,\
+				 self.start_dates, self.end_dates = self.openUrl(url)	
 		elif dct is not None:
 			self.titles = dct["titles"]
 			self.chart = dct["chart"]
 			self.ids = dct["ids"]
+			self.start_dates = [datetime.strptime(ds, "%Y/%m/%d")
+					   for ds in dct["start_dates"]]
+			self.end_dates = [datetime.strptime(de, "%Y/%m/%d")
+					 for de in dct["end_dates"]]
 		self.table.clear()
 		self.table.setRowCount(len(self.chart))
 		self.table.setColumnCount(len(self.titles))
@@ -278,25 +308,25 @@ class MyMainWindow(QMainWindow):
 			for x, cell in enumerate(line):
 				self.table.setItem(y, x, QTableWidgetItem(cell))
 
+	def removeRow(self, row):
+		self.table.removeRow(row)
+		self.record.append((row, self.chart[row], self.ids[row],
+						self.start_dates[row], self.end_dates[row]))
+		self.chart.pop(row)
+		self.ids.pop(row)
+		self.start_dates.pop(row)
+		self.end_dates.pop(row)
+
 	def clickTable(self, row, _):
 		url = f"https://advisory.ntu.edu.tw/CMS/ScholarshipDetail?id={self.ids[row]}"
 		dialog = ContentDialog(self, url)
 		dialog.exec_()
-		if dialog.result == "Remove":
-			self.table.removeRow(row)
-			self.record.append((row, self.chart[row], self.ids[row]))
-			self.chart.pop(row)
-			self.ids.pop(row)
-		elif dialog.result == "RemoveAndNext":
-			self.table.removeRow(row)
-			self.record.append((row, self.chart[row], self.ids[row]))
-			self.chart.pop(row)
-			self.ids.pop(row)
+		if "Remove" in dialog.result:
+			self.removeRow(row)
+			row -= 1
+		if "Next" in dialog.result:
 			if row < len(self.chart):
-				self.clickTable(row, None)
-		elif dialog.result == "Next":
-			if row < len(self.chart):
-				self.clickTable(row, None)
+				self.clickTable(row+1, None)
 
 if __name__ == "__main__":
 	app = QApplication(sys.argv)
