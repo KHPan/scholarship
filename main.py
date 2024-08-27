@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow,
 			QTableWidget, QTableWidgetItem,
-			QWidget, QPushButton, QTextBrowser,
+			QWidget, QPushButton, QTextBrowser, QComboBox,
 			QVBoxLayout, QHBoxLayout,
 			QFontDialog, QFileDialog, QProgressDialog,
 			QInputDialog, QMessageBox, QDialog)
@@ -255,11 +255,21 @@ class MyMainWindow(QMainWindow):
 	def onRemoveInvalid(self):
 		now = datetime.now()
 		removes = []
-		for i, (sd, ed) in enumerate(zip(self.start_dates, self.end_dates)):
-			if sd > now or ed < now:
+		for i, ed in enumerate(self.end_dates):
+			if ed < now:
 				removes.append(i)
 		for i in reversed(removes):
 			self.removeRow(i)
+
+	def onSort(self, index: int):
+		bit_lists = list(zip(self.chart, self.ids,
+					   self.start_dates, self.end_dates))
+		bit_lists.sort(key=lambda x: (x[index // 2 + 2],
+								int(x[0][0]) * (1 - index % 2 * 2)),
+				 reverse=index % 2 == 1)
+		self.chart, self.ids, self.start_dates, self.end_dates\
+			  = map(list, zip(*bit_lists))
+		self.setTable()
 
 	def initUI(self):
 		self.font = QFont()
@@ -278,6 +288,12 @@ class MyMainWindow(QMainWindow):
 		buttonLayout.addWidget(self.addBtn("檔案匯出", self.onExport))
 		buttonLayout.addWidget(self.addBtn("回到上一步", self.onBackward))
 		buttonLayout.addWidget(self.addBtn("移除過期", self.onRemoveInvalid))
+		self.sortCombo = QComboBox(self)
+		self.sortCombo.addItems(
+			["按照開始日期排序(遞增)", "按照開始日期排序(遞減)",
+				"按照結束日期排序(遞增)", "按照結束日期排序(遞減)"])
+		self.sortCombo.currentIndexChanged.connect(self.onSort)
+		buttonLayout.addWidget(self.sortCombo)
 		mainLayout.addLayout(buttonLayout)
 
 		self.table = LineQTableWidget(self)
@@ -291,7 +307,9 @@ class MyMainWindow(QMainWindow):
 	def setTable(self, url: str | None = None, dct: dict | None = None):
 		if url is not None:
 			self.titles, self.chart, self.ids,\
-				 self.start_dates, self.end_dates = self.openUrl(url)	
+				 self.start_dates, self.end_dates = self.openUrl(url)
+			self.onSort(self.sortCombo.currentIndex())
+			return
 		elif dct is not None:
 			self.titles = dct["titles"]
 			self.chart = dct["chart"]
