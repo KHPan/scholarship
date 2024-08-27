@@ -147,17 +147,25 @@ class MyMainWindow(QMainWindow):
 				self.setTable(dct=dct)
 			self.record = []
 	
+	def save(self, filename: str | None = None):
+		if filename is None:
+			if not hasattr(self, "filename"):
+				return
+		else:
+			self.filename = filename
+		dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids,
+			"start_dates": [ds.strftime("%Y/%m/%d")
+					for ds in self.start_dates],
+			"end_dates": [de.strftime("%Y/%m/%d")
+					for de in self.end_dates]}
+		with open(self.filename, "w") as f:
+			json.dump(dct, f)
+
 	def onExport(self):
 		filename, _ = QFileDialog.getSaveFileName(self, "Save File", "",
 							"JSON Files (*.json)")
 		if filename:
-			dct = {"titles": self.titles, "chart": self.chart, "ids": self.ids,
-		  		"start_dates": [ds.strftime("%Y/%m/%d")
-					  for ds in self.start_dates],
-				"end_dates": [de.strftime("%Y/%m/%d")
-				  		for de in self.end_dates]}
-			with open(filename, "w") as f:
-				json.dump(dct, f)
+			self.save(filename)
 
 	def onBackward(self):
 		if len(self.record) == 0:
@@ -334,17 +342,20 @@ class MyMainWindow(QMainWindow):
 		self.ids.pop(row)
 		self.start_dates.pop(row)
 		self.end_dates.pop(row)
+		self.save()
 
 	def clickTable(self, row, _):
 		url = f"https://advisory.ntu.edu.tw/CMS/ScholarshipDetail?id={self.ids[row]}"
 		dialog = ContentDialog(self, url)
 		dialog.exec_()
-		if "Remove" in dialog.result:
-			self.removeRow(row)
-			row -= 1
-		if "Next" in dialog.result:
-			if row < len(self.chart):
-				self.clickTable(row+1, None)
+		if dialog.result:
+			if "Remove" in dialog.result:
+				self.removeRow(row)
+				row -= 1
+			if "Next" in dialog.result:
+				row += 1
+				if row < len(self.chart):
+					self.clickTable(row, None)
 
 if __name__ == "__main__":
 	app = QApplication(sys.argv)
