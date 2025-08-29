@@ -1,0 +1,21 @@
+# Core runtime dependencies
+requests
+beautifulsoup4
+lxml
+pydantic
+google-genai
+python-dotenv
+jsonlines
+markdownify
+send2trash
+markitdown
+pywin32
+pypandoc
+PyQt5
+python-magic-bin  # Windows build providing libmagic; on Linux/macOS use: python-magic
+
+# If deploying on non-Windows systems without MS Word automation, you can remove:
+#   pywin32 markitdown (if you don't need Word->Markdown) and python-magic-bin (replace with python-magic + system libmagic)
+
+# Optional helper (uncomment if needed):
+# tqdm  # for progress bars
