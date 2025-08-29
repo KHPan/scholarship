@@ -142,7 +142,7 @@ class MyMainWindow(QMainWindow):
 		filename, _ = QFileDialog.getOpenFileName(self, "Open File", "",
 							"JSON Files (*.json)")
 		if filename:
-			with open(filename, "r") as f:
+			with open(filename, "r", encoding="utf-8") as f:
 				dct = json.load(f)
 				self.setTable(dct=dct)
 			self.record = []
@@ -158,8 +158,8 @@ class MyMainWindow(QMainWindow):
 					for ds in self.start_dates],
 			"end_dates": [de.strftime("%Y/%m/%d")
 					for de in self.end_dates]}
-		with open(self.filename, "w") as f:
-			json.dump(dct, f)
+		with open(self.filename, "w", encoding="utf-8") as f:
+			json.dump(dct, f, ensure_ascii=False, indent=4)
 
 	def onExport(self):
 		filename, _ = QFileDialog.getSaveFileName(self, "Save File", "",
